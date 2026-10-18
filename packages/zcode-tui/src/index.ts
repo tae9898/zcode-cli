@@ -25,14 +25,17 @@ import {
   Container,
   isKeyRelease,
   isViewportTUI,
+  KeybindingsManager,
   Markdown,
   matchesKey,
   ProcessTerminal,
   ScrollView,
+  setKeybindings,
   Spacer,
   Text,
   TuiAltScreen,
   TuiMainScreen,
+  TUI_KEYBINDINGS,
   VStack,
   type TUI,
   type TuiMode,
@@ -6075,8 +6078,21 @@ class ZCodeTui {
   }
 }
 
+/**
+ * Terminals and multiplexers that cannot emit the standard CSI 13;2u for
+ * Shift+Enter often send Alt+Enter instead (legacy ESC CR, which relays such
+ * as herdr re-encode as CSI 13;3u). pi-tui leaves alt+enter unbound, so the
+ * keypress is dropped; accept it as a newline alongside the default keys.
+ */
+export const newLineKeybindings = ["shift+enter", "ctrl+j", "alt+enter"] as const;
+
+function applyNewLineKeybindings(): void {
+  setKeybindings(new KeybindingsManager(TUI_KEYBINDINGS, { "tui.input.newLine": [...newLineKeybindings] }));
+}
+
 export async function runTui(options: TuiOptions): Promise<void> {
   suppressTuiAiSdkWarnings();
+  applyNewLineKeybindings();
   const readyOptions = await loadTuiStartupOptions(options);
   if (readyOptions) await new ZCodeTui(readyOptions).run();
 }
