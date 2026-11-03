@@ -14,11 +14,15 @@ import {
 } from "../src/runtime-capabilities.ts";
 import { parseReleaseVersion, syncedReleaseVersion } from "./release-version.ts";
 import { markRuntimeModified } from "./runtime-attribution.ts";
+import { hasRuntimeHeadlessLifecycle, patchRuntimeHeadlessLifecycle } from "./runtime-headless-patches.ts";
+export { hasRuntimeHeadlessLifecycle, patchRuntimeHeadlessLifecycle } from "./runtime-headless-patches.ts";
 import { hasRuntimeSessionLifecycle, patchRuntimeSessionLifecycle } from "./runtime-session-lifecycle-patches.ts";
 export { hasRuntimeSessionLifecycle, patchRuntimeSessionLifecycle } from "./runtime-session-lifecycle-patches.ts";
 import { hasRuntimeBigmodelOAuth, patchRuntimeBigmodelOAuth } from "./runtime-bigmodel-oauth-patches.ts";
 import { hasRuntimeSharedOAuth, patchRuntimeSharedOAuth } from "./runtime-shared-oauth-patches.ts";
 export { hasRuntimeSharedOAuth, patchRuntimeSharedOAuth } from "./runtime-shared-oauth-patches.ts";
+import { hasRuntimeStartPlan, patchRuntimeStartPlan } from "./runtime-start-plan-patches.ts";
+export { hasRuntimeStartPlan, patchRuntimeStartPlan } from "./runtime-start-plan-patches.ts";
 export { hasRuntimeBigmodelOAuth, patchRuntimeBigmodelOAuth } from "./runtime-bigmodel-oauth-patches.ts";
 import { hasRuntimeBrowserUrlOpening, patchRuntimeBrowserUrlOpening } from "./runtime-browser-patches.ts";
 export { hasRuntimeBrowserUrlOpening, patchRuntimeBrowserUrlOpening } from "./runtime-browser-patches.ts";
@@ -1908,6 +1912,12 @@ export const runtimePatchPlan: readonly RuntimePatchDefinition[] = [
     verify: hasRuntimeStreamEofFinishGuard
   },
   {
+    id: "headless-lifecycle",
+    requirement: "required",
+    apply: patchRuntimeHeadlessLifecycle,
+    verify: hasRuntimeHeadlessLifecycle
+  },
+  {
     id: "sqlite-busy-timeout",
     requirement: "required",
     apply: patchRuntimeSqliteBusyTimeout,
@@ -1966,6 +1976,10 @@ export const runtimePatchPlan: readonly RuntimePatchDefinition[] = [
   {
     id: "shared-oauth", requirement: "required", apply: patchRuntimeSharedOAuth,
     verify: hasRuntimeSharedOAuth
+  },
+  {
+    id: "start-plan-standalone", requirement: "optional", apply: patchRuntimeStartPlan,
+    verify: hasRuntimeStartPlan
   },
   {
     id: "login-model-defaults",

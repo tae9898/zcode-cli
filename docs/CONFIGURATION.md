@@ -205,7 +205,7 @@ Plugin controls remain under `plugins`, hook declarations under
 These paths distinguish the packaged CLI from the upstream application. The
 source references below are pinned to upstream
 [`29628c9` / `v3.14.3`](https://github.com/zai-org/ZCode/tree/29628c9acdb81b703bbd4080c207a0e7ce5e276e).
-This package's runtime lock selects the separate Desktop 3.17.1 / runtime 0.17.1 artifact; the
+This package's runtime lock selects the separate Desktop 3.17.2 / runtime 0.17.1 artifact; the
 public source snapshot is not an assertion of that artifact's build commit.
 The configuration boundaries were rechecked on 2026-10-20 against
 [`0a1fc56` / `0.17.0`](https://github.com/zai-org/ZCode/tree/0a1fc56d279fd1001f78387bd81aec1c26767411).
@@ -333,6 +333,21 @@ Explicitly configured manual API keys retain their own account selection.
 Z.AI credentials use Desktop's business-token format. Older CLI OAuth credentials
 are converted after successful validation on their first request; failed
 validation or a concurrent login never overwrites the newer shared session.
+
+Start Plan uses the same ZCode OAuth login as Coding Plan; there is no second
+Start Plan sign-in. An existing Desktop session works without another login.
+Choose `account:zai-start-plan/<model>` or `account:bigmodel-start-plan/<model>`
+in `/model`, or pass it with `--model`. Start Plan requests use the shared ZCode
+JWT directly, without exchanging a Coding Plan project token. The runtime still
+builds and signs the requests. Switching models does not change the saved login.
+
+Start Plan providers are available locally when the active account has a valid
+ZCode JWT and profile; the server determines the account's actual grants, model
+availability and remaining quota. A manual Coding Plan API key alone is not a
+ZCode session. Missing, expired or rejected session tokens require the shared
+ZCode login to be renewed, not an additional plan-specific login. Start Plan
+requests never fall back to paid Coding Plan credentials. New requests follow
+the current Desktop account; retries cannot switch accounts or tokens mid-turn.
 
 For macOS OAuth, the CLI temporarily registers a callback receiver, checks
 `state`, restores the previous `zcode://` handler and sends the callback through

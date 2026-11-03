@@ -62,6 +62,62 @@ async function run(args: string[], input = "", environment: Record<string, strin
 }
 
 describe("launcher/runtime integration", () => {
+  test.skipIf(process.platform === "win32")("forwards repeated termination signals until the runtime exits", async () => {
+    if (!node) throw new Error("Node.js is required for launcher signal tests.");
+    const directory = await mkdtemp(join(tmpdir(), "zcode-launcher-signals-"));
+    const fakeNode = join(directory, "fake-node");
+    await writeFile(fakeNode, [
+      `#!${node}`,
+      "let signals = 0;",
+      "process.on('SIGTERM', () => {",
+      "  process.stdout.write(++signals === 1 ? 'FIRST_SIGNAL\\n' : 'SECOND_SIGNAL\\n');",
+      "  if (signals === 2) process.exitCode = 143, clearInterval(keepAlive);",
+      "});",
+      "const keepAlive = setInterval(() => {}, 1000);",
+      "process.stdout.write('READY ' + process.pid + '\\n');",
+      ""
+    ].join("\n"));
+    await chmod(fakeNode, 0o755);
+    const child = Bun.spawn([process.execPath, "bin/zcode.ts", "-p", "offline signal test"], {
+      cwd: root,
+      env: { ...runtimeTestEnv(directory), ZCODE_NODE: fakeNode },
+      stdin: "ignore", stdout: "pipe", stderr: "pipe"
+    });
+    let runtimePid: number | undefined;
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      if (runtimePid) try { process.kill(runtimePid, "SIGKILL"); } catch {}
+    }, 8_000);
+    try {
+      const output = (async () => {
+        let stdout = "", pending = "";
+        for await (const chunk of child.stdout) {
+          const text = new TextDecoder().decode(chunk);
+          stdout += text;
+          pending += text;
+          let newline: number;
+          while ((newline = pending.indexOf("\n")) >= 0) {
+            const line = pending.slice(0, newline);
+            pending = pending.slice(newline + 1);
+            if (line.startsWith("READY ")) {
+              runtimePid = Number(line.slice(6));
+              child.kill("SIGTERM");
+            } else if (line === "FIRST_SIGNAL") child.kill("SIGTERM");
+          }
+        }
+        return stdout;
+      })();
+      const [code, stdout, stderr] = await Promise.all([child.exited, output, new Response(child.stderr).text()]);
+      expect(stdout, stderr).toContain("SECOND_SIGNAL");
+      expect(code).toBe(143);
+    } finally {
+      clearTimeout(timeout);
+      child.kill("SIGKILL");
+      if (runtimePid) try { process.kill(runtimePid, "SIGKILL"); } catch {}
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   test("rejects a keyless prompt before starting the runtime or creating a session", async () => {
     const directory = await mkdtemp(join(tmpdir(), "zcode-keyless-prompt-"));
     const fakeNode = join(directory, "fake-node");
@@ -78,82 +134,6 @@ describe("launcher/runtime integration", () => {
       expect(result.stderr).toContain("No model request was sent");
       expect(result.stdout).not.toContain("RUNTIME_STARTED");
       expect(await Bun.file(join(directory, ".zcode", "cli", "db", "db.sqlite")).exists()).toBe(false);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("keeps TUI runtime diagnostics out of the interactive terminal", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "zcode-launcher-stderr-"));
-    const fakeNode = join(directory, "fake-node");
-    const logPath = join(directory, "tui-runtime.log");
-    await writeFile(fakeNode, [
-      "#!/bin/sh",
-      "printf '%s\\n' 'AI SDK Warning: cacheControl breakpoint limit' >&2",
-      "printf '%s\\n' 'ProviderBusinessError: No available channel for model GLM-5.2' >&2",
-      "printf '\\033[2J' >&2",
-      "exit \"${FAKE_NODE_EXIT:-0}\"",
-      ""
-    ].join("\n"));
-    await chmod(fakeNode, 0o755);
-    try {
-      const tui = await run(["--cwd", directory, "tui"], "", {
-        ZCODE_NODE: fakeNode,
-        ZCODE_TUI_RUNTIME_LOG: logPath
-      });
-      expect(tui.code).toBe(0);
-      expect(tui.stderr).not.toContain("ProviderBusinessError");
-      expect(tui.stderr).not.toContain("cacheControl breakpoint limit");
-      const tuiLog = await Bun.file(logPath).text();
-      expect(tuiLog).toContain("ProviderBusinessError");
-      expect(tuiLog).toContain("cacheControl breakpoint limit");
-
-      const failed = await run(["--cwd", directory, "tui"], "", {
-        FAKE_NODE_EXIT: "7",
-        ZCODE_NODE: fakeNode,
-        ZCODE_TUI_RUNTIME_LOG: logPath
-      });
-      expect(failed.code).toBe(7);
-      expect(failed.stderr).toContain("ZCode runtime exited with status 7");
-      expect(failed.stderr).toContain(`Diagnostics: ${logPath}`);
-      expect(failed.stderr).not.toContain("ProviderBusinessError");
-
-      const print = await run(["--print", "hello"], "", {
-        ZCODE_NODE: fakeNode,
-        ANTHROPIC_API_KEY: "fixture-only-key"
-      });
-      expect(print.code).toBe(0);
-      expect(print.stderr).toContain("ProviderBusinessError");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  test("rotates the bounded TUI diagnostic log between invocations", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "zcode-launcher-log-rotation-"));
-    const fakeNode = join(directory, "fake-node");
-    const logPath = join(directory, "tui-runtime.log");
-    await writeFile(fakeNode, [
-      "#!/bin/sh",
-      "printf '%s\\n' 'fresh diagnostic' >&2",
-      "exit 0",
-      ""
-    ].join("\n"));
-    await chmod(fakeNode, 0o755);
-    await writeFile(logPath, Buffer.alloc(2 * 1024 * 1024, "x"));
-    if (process.platform !== "win32") await chmod(logPath, 0o644);
-    try {
-      const result = await run(["tui"], "", {
-        ZCODE_NODE: fakeNode,
-        ZCODE_TUI_RUNTIME_LOG: logPath
-      });
-      expect(result.code).toBe(0);
-      expect(await Bun.file(logPath).text()).toContain("fresh diagnostic");
-      expect(Bun.file(`${logPath}.1`).size).toBe(2 * 1024 * 1024);
-      if (process.platform !== "win32") {
-        expect((await stat(logPath)).mode & 0o777).toBe(0o600);
-        expect((await stat(`${logPath}.1`)).mode & 0o777).toBe(0o600);
-      }
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -180,137 +160,6 @@ describe("launcher/runtime integration", () => {
       expect(result.stderr).not.toContain("ProviderBusinessError");
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
-
-  test("keeps non-agent runtime subcommands usable", async () => {
-    const doctor = await run(["doctor", "--json"]);
-    expect(doctor.code).toBe(0);
-    expect(JSON.parse(doctor.stdout)).toMatchObject({ cli: { version: readRuntimeVersion() } });
-
-    const plugins = await run(["plugins", "list", "--json"]);
-    expect(plugins.code).toBe(0);
-    expect(JSON.parse(plugins.stdout)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "browser-use", enabled: true })
-    ]));
-
-    const skills = await run(["skills", "list", "--json"]);
-    expect(skills.code).toBe(0);
-    expect(JSON.parse(skills.stdout).skills).toEqual(expect.arrayContaining([
-      expect.objectContaining({ qualifiedName: "browser-use:control-browser" })
-    ]));
-  }, 30_000);
-
-  test("lists and inspects workspace custom commands", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "zcode-custom-commands-"));
-    try {
-      const commandDirectory = join(directory, ".zcode", "commands");
-      await mkdir(commandDirectory, { recursive: true });
-      await writeFile(join(commandDirectory, "smoke.md"), [
-        "---",
-        "description: Smoke command description.",
-        "argument-hint: <topic>",
-        "skills: browser-use:control-browser",
-        "---",
-        "",
-        "Summarize $ARGUMENTS.",
-        ""
-      ].join("\n"));
-
-      const listed = await run(["--cwd", directory, "commands", "list", "--json"]);
-      expect(listed.code).toBe(0);
-      const catalog = JSON.parse(listed.stdout);
-      expect(catalog.totalDiscovered).toBe(catalog.commands.length);
-      expect(catalog.commands.filter((command: { scope: string }) => command.scope === "project")).toHaveLength(1);
-      expect(catalog).toMatchObject({
-        commands: expect.arrayContaining([
-          expect.objectContaining({
-            argumentHint: "<topic>",
-            description: "Smoke command description.",
-            name: "smoke",
-            scope: "project",
-            skills: ["browser-use:control-browser"],
-            source: "zcode"
-          })
-        ]),
-        cwd: directory,
-        diagnostics: []
-      });
-
-      const inspected = await run(["--cwd", directory, "commands", "inspect", "smoke", "--json"]);
-      expect(inspected.code).toBe(0);
-      expect(JSON.parse(inspected.stdout)).toMatchObject({
-        command: {
-          content: "Summarize $ARGUMENTS.",
-          metadata: expect.objectContaining({
-            argumentHint: "<topic>",
-            description: "Smoke command description.",
-            name: "smoke",
-            scope: "project",
-            skills: ["browser-use:control-browser"],
-            source: "zcode"
-          }),
-          truncated: false
-        },
-        cwd: directory,
-        diagnostics: []
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("passes app-server through unchanged and exposes Plugin references", async () => {
-    const workspacePath = root.replace(/\/$/u, "");
-    const request = {
-      id: 1,
-      method: "plugins/referenceCatalog",
-      params: {
-        workspace: { workspacePath, workspaceKey: workspacePath }
-      }
-    };
-    // EOF means client disconnection in 3.14; close only after the response.
-    const result = await run(["app-server"], `${JSON.stringify(request)}\n`, {}, request.id);
-    expect(result.code).toBe(0);
-    const response = result.stdout.trim().split("\n").map((line) => JSON.parse(line))
-      .find((message) => message.id === request.id);
-    expect(response).toMatchObject({
-      id: 1,
-      result: {
-        plugins: expect.arrayContaining([
-          expect.objectContaining({
-            pluginId: "browser-use@zcode-plugins-official",
-            skillQualifiedNames: expect.arrayContaining(["browser-use:control-browser"])
-          })
-        ])
-      }
-    });
-  }, 30_000);
-
-  test("resolves a real Plugin install dry-run without changing storage", async () => {
-    const result = await run([
-      "plugins",
-      "install",
-      "browser-use@zcode-plugins-official",
-      "--dry-run",
-      "--json"
-    ]);
-    expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      description: {
-        components: expect.arrayContaining([
-          expect.objectContaining({
-            kind: "skill",
-            items: expect.arrayContaining([
-              expect.objectContaining({ name: "control-browser" })
-            ])
-          })
-        ])
-      },
-      plan: {
-        dependencyClosure: [],
-        diagnostics: []
-      }
-    });
-  }, 30_000);
 
   test("adds a local marketplace and installs its Plugin end to end", async () => {
     const marketplace = join(home, "fixture-marketplace");

@@ -21,16 +21,19 @@ import {
   hasRuntimeCliSettingsFile,
   hasRuntimeCliHelpContract,
   hasRuntimeHttpNoContentGuard,
+  hasRuntimeHeadlessLifecycle,
   hasRuntimeNetworkRetryGuard,
   hasRuntimeResolvedContextWindow,
   hasRuntimeRecursiveWorkspacePaths,
   hasRuntimeSharedOAuth,
+  hasRuntimeStartPlan,
   hasRuntimeSqliteBusyTimeout,
   hasRuntimeSqliteWriteRecovery,
   hasRuntimeStreamEofFinishGuard,
   hasRuntimeTrackedDetachedAgentLifecycle,
   patchRuntimeGoalFailurePause,
   patchRuntimeHttpNoContent,
+  patchRuntimeHeadlessLifecycle,
   patchRuntimeLoginModelDefaults,
   patchRuntimeNetworkRetryClassification,
   patchRuntimeOfficialMcpAvailability,
@@ -92,6 +95,8 @@ if (patchRuntimeLoginModelDefaults(runtimeSource) !== runtimeSource
   || (patchEnabled("goal-failure-pause") && patchRuntimeGoalFailurePause(runtimeSource) !== runtimeSource)
   || patchRuntimeHttpNoContent(runtimeSource) !== runtimeSource
   || !hasRuntimeHttpNoContentGuard(runtimeSource)
+  || patchRuntimeHeadlessLifecycle(runtimeSource) !== runtimeSource
+  || !hasRuntimeHeadlessLifecycle(runtimeSource)
   || patchRuntimeNetworkRetryClassification(runtimeSource) !== runtimeSource
   || !hasRuntimeNetworkRetryGuard(runtimeSource)
   || patchRuntimeSqliteBusyTimeout(runtimeSource) !== runtimeSource
@@ -108,6 +113,7 @@ if (patchRuntimeLoginModelDefaults(runtimeSource) !== runtimeSource
   || !hasRuntimeRecursiveWorkspacePaths(runtimeSource)
   || !hasRuntimeResolvedContextWindow(runtimeSource)
   || !hasRuntimeSharedOAuth(runtimeSource)
+  || (patchEnabled("start-plan-standalone") && !hasRuntimeStartPlan(runtimeSource))
   || !hasRuntimeCliSettingsFile(runtimeSource)
   || !runtimeSource.includes(".readRuntimeProjection=async()=>{let $zRuntimeProjectionBridge=await ")
   || !runtimeSource.includes('"plugin://"')

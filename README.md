@@ -228,6 +228,14 @@ into a request that loads each selected Skill through the runtime's `Skill`
 tool before carrying out the visible user request. Unknown `$` tokens remain
 ordinary prompt text.
 
+Skills also appear in `/` command completion, marked `Skill` with their
+descriptions. Type `/` and filter by name, or enter `/<skill-name> <task>`
+directly (for example, `/audit review the current changes`). These shortcuts
+use the runtime's `/skill <name> <task>` route. Duplicate identifiers use the
+first discovered entry; plugin Skills retain their qualified names. Built-in
+commands, their aliases and custom commands take precedence over skill
+shortcuts with the same name; use `$name` or `/skill name` for those Skills.
+
 Use `@plugin` when the whole Plugin is relevant, including its MCP servers or
 Subagents. Use `$plugin:skill` when one exact Skill must be loaded before the
 task starts.
@@ -500,6 +508,9 @@ Without `--effort`, `--model` uses the model's default level. Both flags require
 `--prompt` (or `-p`) and leave the saved default for new sessions unchanged; the
 run's model and effort are recorded on that session.
 
+For automation and long-running `-p` jobs, see [headless execution](./docs/HEADLESS.md)
+for output completion, cancellation, background execution and validation limits.
+
 ZCode reads MCP servers, hooks, plugins, permissions, network, storage and display
 settings from `~/.zcode/cli/setting.json` (or
 `%USERPROFILE%\.zcode\cli\setting.json` on Windows). Project settings use
@@ -586,10 +597,13 @@ Run all validation layers:
 
 ```bash
 bun run typecheck
-bun test
+bun run test
 bun run check
 bun run check:tui
 ```
+
+The required contracts and the reason for every retained test file are listed in
+[`test/README.md`](./test/README.md). `bun run test:unit` runs only the fast subset.
 
 For the OAuth path, release workflow details, CI, and the full development
 guide, see [Development](./docs/DEVELOPMENT.md). For maintainer-only release
